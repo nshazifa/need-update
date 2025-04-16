@@ -5,8 +5,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Order Tracking</title>
+
   <script type="module" src="loadNavbar.js"></script>
+
+
   <script type="module">
+
     import { auth, db } from "./firebase-config.js";
     import { collection, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
     import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
@@ -14,28 +18,43 @@
     document.addEventListener("DOMContentLoaded", () => {
       onAuthStateChanged(auth, async (user) => {
         if (user) {
-          document.getElementById("userName").textContent = user.displayName || "User";
           document.getElementById("userEmail").textContent = user.email;
-          await loadUserDetails(user.uid);
-          await loadOrders(user.uid);
+          await loadOrders(user.uid); // This loads all orders
+
+          // Fetch details from the first order found (assuming you want name from the first order's DeliveryInfo)
+          const ordersRef = collection(db, `Users/${user.uid}/Orders`);
+          const ordersSnapshot = await getDocs(ordersRef);
+
+          if (!ordersSnapshot.empty) {
+            const firstOrderId = ordersSnapshot.docs[0].id;
+            await loadUserDetails(user.uid, firstOrderId); // This will fetch name from delivery data
+          }
         }
       });
+
     });
 
-    // the user s phone and address is not displaying !
-    async function loadUserDetails(userId) {
-      try {
-        const userRef = doc(db, `Users/${userId}/Profile`);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          const userData = userSnap.data();
-          document.getElementById("userPhone").textContent = userData.phone || "Not Available";
-          document.getElementById("userAddress").textContent = userData.address || "Not Available";
-        }
-      } catch (error) {
-        console.error("Error loading user details:", error);
-      }
+   
+    async function loadUserDetails(userId, orderId) {
+  try {
+    const deliveryRef = doc(db, `Users/${userId}/Orders/${orderId}/DeliveryInfo/Details`);
+    const deliverySnap = await getDoc(deliveryRef);
+
+    console.log("Fetching from:", `Users/${userId}/Orders/${orderId}/DeliveryInfo/Details`);
+
+    if (deliverySnap.exists()) {
+      const deliveryData = deliverySnap.data();
+      document.getElementById("userName").textContent =
+        `${deliveryData.firstName || ""} ${deliveryData.lastName || ""}`.trim() || "Not Available";
+      document.getElementById("userPhone").textContent = deliveryData.phone || "Not Available";
+      document.getElementById("userAddress").textContent = deliveryData.address || "Not Available";
+    } else {
+      console.log("No delivery details found.");
     }
+  } catch (error) {
+    console.error("Error loading user delivery details:", error);
+  }
+}
 
     async function loadOrders(userId) {
       try {
@@ -51,27 +70,34 @@
         }
 
         let isFirstOrder = true;
-        ordersSnapshot.forEach(async (orderDoc) => {
+        for (const orderDoc of ordersSnapshot.docs) {
           const orderData = orderDoc.data();
           const orderId = orderDoc.id;
+
           const orderElement = document.createElement("div");
           orderElement.classList.add("order-item");
           orderElement.innerHTML = `
-                        <button class="order-header" onclick="toggleOrderDetails('${orderId}')">
-                            Order ID: ${orderId} - ₹${orderData.total} (${orderData.status})
-                        </button>
-                        <div class="order-details" id="${orderId}" style="display: ${isFirstOrder ? 'block' : 'none'};">
-                            <ul id="items-${orderId}"></ul>
-                            <p><strong>Total:</strong> ₹${orderData.total}</p>
-                            <p><strong>Payment Method:</strong> <span id="payment-${orderId}"></span></p>
-                        </div>
-                    `;
+          <button class="order-header" onclick="toggleOrderDetails('${orderId}')">
+            Order ID: ${orderId} - ₹${orderData.total} (${orderData.status})
+          </button>
+          <div class="order-details" id="${orderId}" style="display: ${isFirstOrder ? 'block' : 'none'};">
+            <ul id="items-${orderId}"></ul>
+            <p><strong>Total:</strong> ₹${orderData.total}</p>
+            <p><strong>Payment Method:</strong> <span id="payment-${orderId}"></span></p>
+          </div>
+        `;
           ordersContainer.appendChild(orderElement);
-          isFirstOrder = false;
 
+          // Load order items & delivery info
           await loadOrderItems(userId, orderId);
           await loadDeliveryInfo(userId, orderId);
-        });
+
+          // Load user delivery details from the first order only
+          if (isFirstOrder) {
+            await loadUserDetails(userId, orderId);
+            isFirstOrder = false;
+          }
+        }
       } catch (error) {
         console.error("Error loading orders:", error);
       }
@@ -102,6 +128,8 @@
       const details = document.getElementById(orderId);
       details.style.display = details.style.display === "none" ? "block" : "none";
     };
+  </script>
+
   </script>
   <style>
     body {
